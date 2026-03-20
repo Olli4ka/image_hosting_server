@@ -13,88 +13,150 @@ document.addEventListener('DOMContentLoaded', function () {
         uploadRedirectButton.addEventListener('click', () => window.location.href = '/upload');
     }
 
-    const displayFiles = () => {
-        const storedFiles = JSON.parse(localStorage.getItem('uploadedImages')) || [];
+    let currentPage = 1;
+    const perPage = 10;
+    let totalImages = 0;
+
+    const displayFiles = async () => {
         fileListWrapper.innerHTML = '';
 
-        if (storedFiles.length === 0) {
-            fileListWrapper.innerHTML = '<p class="upload__promt" style="text-align: center; margin-top: 50px;">No images uploaded yet.</p>';
-            return;
-        }
+        try {
+            const response = await fetch(`/api/images?page=${currentPage}`);
+            const result = await response.json();
 
-        const container = document.createElement('div');
-        container.className = 'file-list-container';
+            if (!result.success) {
+                fileListWrapper.innerHTML = '<p>Error loading images</p>';
+                return;
+            }
 
-        const header = document.createElement('div');
-        header.className = 'file-list-header';
-        header.innerHTML = `
-            <div class="file-col file-col-name">Name</div>
-            <div class="file-col file-col-url">Url</div>
-            <div class="file-col file-col-delete">Delete</div>
-        `;
-        container.appendChild(header);
+            const images = result.images;
+            totalImages = result.total;
 
-        const list = document.createElement('div');
-        list.id = 'file-list';
+            if (images.length === 0) {
+                fileListWrapper.innerHTML = '<p class="upload__promt" style="text-align: center; margin-top: 50px;">No images uploaded yet.</p>';
+                return;
+            }
 
-        storedFiles.forEach((fileData, index) => {
-            const fileItem = document.createElement('div');
-            fileItem.className = 'file-list-item';
-            fileItem.innerHTML = `
-                <div class="file-col file-col-name">
-                    <span class="file-icon"><img src="/static/img/group.png" alt="file icon"></span>
-                    ${fileData.url ? `<img src="${fileData.url}" alt="thumbnail">` : ''}
-                    <span class="file-name" title="${fileData.originalName || fileData.displayName || fileData.name}">${fileData.displayName || fileData.name}</span>
-                </div>
-                <div class="file-col file-col-url">https://group6-image-hosting-server.com/${fileData.name}</div>
-                <div class="file-col file-col-delete">
-                    <button class="delete-btn" data-index="${index}"><img src="/static/img/delete.png" alt="delete icon"></button>
-                </div>
+            const container = document.createElement('div');
+            container.className = 'file-list-container';
+
+            const header = document.createElement('div');
+            header.className = 'file-list-header';
+            header.innerHTML = `
+                <div class="file-col file-col-name">Name</div>
+                <div class="file-col file-col-url">Url</div>
+                <div class="file-col file-col-delete">Delete</div>
             `;
-            list.appendChild(fileItem);
-        });
+            container.appendChild(header);
 
-        container.appendChild(list);
-        fileListWrapper.appendChild(container);
-        addDeleteListeners();
+            const list = document.createElement('div');
+            list.id = 'file-list';
+
+            images.forEach((fileData, index) => {
+                const fileItem = document.createElement('div');
+                fileItem.className = 'file-list-item';
+
+                fileItem.innerHTML = `
+                    <div class="file-col file-col-name">
+                        <span class="file-icon">
+                            <img src="/static/img/group.png" alt="file icon">
+                        </span>
+
+                        <span class="file-name">
+                            image${String((currentPage - 1) * perPage + index + 1).padStart(2, '0')}.jpg
+                        </span>
+                    </div>
+
+                    <div class="file-col file-col-url">
+                        https://group6-image-hosting-server.com/${fileData.filename}
+                    </div>
+
+                    <div class="file-col file-col-delete">
+                        <button class="delete-btn" data-id="${fileData.id}">
+                            <img src="/static/img/delete.png" alt="delete icon">
+                        </button>
+                    </div>
+                `;
+
+                list.appendChild(fileItem);
+            });
+
+            container.appendChild(list);
+
+            const totalPages = Math.ceil(totalImages / perPage);
+
+            const pagination = document.createElement('div');
+            pagination.id = 'pagination';
+            pagination.style.marginTop = '20px';
+            pagination.style.textAlign = 'center';
+
+            let pagesHTML = '';
+
+            for (let i = 1; i <= totalPages; i++) {
+                pagesHTML += `
+                    <button class="page-btn" data-page="${i}"
+                        style="margin: 0 3px; ${i === currentPage ? 'font-weight:bold;' : ''}">
+                        ${i}
+                    </button>
+                `;
+            }
+
+            pagination.innerHTML = `
+                <button id="prev-btn" ${currentPage === 1 ? 'disabled' : ''}>Prev</button>
+                ${pagesHTML}
+                <button id="next-btn" ${currentPage === totalPages ? 'disabled' : ''}>Next</button>
+            `;
+
+            container.appendChild(pagination);
+            fileListWrapper.appendChild(container);
+
+            document.getElementById('prev-btn').addEventListener('click', () => {
+                if (currentPage > 1) {
+                    currentPage--;
+                    displayFiles();
+                }
+            });
+
+            document.getElementById('next-btn').addEventListener('click', () => {
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    displayFiles();
+                }
+            });
+
+            document.querySelectorAll('.page-btn').forEach(button => {
+                button.addEventListener('click', () => {
+                    currentPage = Number(button.dataset.page);
+                    displayFiles();
+                });
+            });
+
+            addDeleteListeners();
+
+        } catch (error) {
+            console.error('Error loading images:', error);
+        }
     };
 
     const addDeleteListeners = () => {
         document.querySelectorAll('.delete-btn').forEach(button => {
             button.addEventListener('click', async (event) => {
-                const indexToDelete = parseInt(event.currentTarget.dataset.index);
-                let storedFiles = JSON.parse(localStorage.getItem('uploadedImages')) || [];
-                const fileToDelete = storedFiles[indexToDelete];
+                const imageId = event.currentTarget.dataset.id;
 
-                if (fileToDelete && fileToDelete.name) {
-                    try {
-                        const imagesResponse = await fetch('/api/images');
-                        const imagesResult = await imagesResponse.json();
+                try {
+                    const deleteResponse = await fetch(`/api/images/${imageId}`, {
+                        method: 'DELETE'
+                    });
 
-                        if (imagesResult.success) {
-                            const imageRecord = imagesResult.images.find(img => img.filename === fileToDelete.name);
+                    const deleteResult = await deleteResponse.json();
 
-                            if (imageRecord) {
-                                const deleteResponse = await fetch(`/api/images/${imageRecord.id}`, {
-                                    method: 'DELETE'
-                                });
-
-                                const deleteResult = await deleteResponse.json();
-
-                                if (deleteResult.success) {
-                                    console.log('File deleted from server:', fileToDelete.name);
-                                } else {
-                                    console.error('Failed to delete file from server:', deleteResult.message);
-                                }
-                            }
-                        }
-                    } catch (error) {
-                        console.error('Error deleting file:', error);
+                    if (!deleteResult.success) {
+                        console.error('Failed to delete image');
                     }
+                } catch (error) {
+                    console.error('Error deleting image:', error);
                 }
 
-                storedFiles.splice(indexToDelete, 1);
-                localStorage.setItem('uploadedImages', JSON.stringify(storedFiles));
                 displayFiles();
             });
         });
@@ -102,3 +164,4 @@ document.addEventListener('DOMContentLoaded', function () {
 
     displayFiles();
 });
+
